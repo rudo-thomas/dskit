@@ -118,6 +118,10 @@ var (
 	// not registered within the ring.
 	ErrInstanceNotFound = errors.New("instance not found in the ring")
 
+	// ErrNotEnoughZones is the error when there are too few zones registered in a zone-aware ring for a
+	// specific operation.
+	ErrNotEnoughZones = errors.New("not enough zones in the ring")
+
 	// ErrTooManyUnhealthyInstances is the error returned when there are too many failed instances for a
 	// specific operation.
 	ErrTooManyUnhealthyInstances = errors.New("too many unhealthy instances in the ring")
@@ -513,9 +517,12 @@ func (r *Ring) GetReplicationSetForOperation(op Operation) (ReplicationSet, erro
 		// RF/2 failing zones. However, we need to protect from the case the ring currently
 		// contains instances in a number of zones < RF.
 		numReplicatedZones := dsmath.Min(len(r.ringZones), r.cfg.ReplicationFactor)
-		minSuccessZones := (numReplicatedZones / 2) + 1
-		maxUnavailableZones = minSuccessZones - 1
+		minSuccessZones := (r.cfg.ReplicationFactor + 1) / 2
+		maxUnavailableZones = numReplicatedZones - minSuccessZones
 
+		if maxUnavailableZones < 0 {
+			return ReplicationSet{}, ErrNotEnoughZones
+		}
 		if len(zoneFailures) > maxUnavailableZones {
 			return ReplicationSet{}, ErrTooManyUnhealthyInstances
 		}

@@ -1004,7 +1004,7 @@ func TestRing_GetReplicationSetForOperation_WithZoneAwarenessEnabled(t *testing.
 			expectedAddresses:           []string{"127.0.0.1", "127.0.0.2", "127.0.0.3", "127.0.0.4"},
 			replicationFactor:           3,
 			expectedMaxErrors:           0,
-			expectedMaxUnavailableZones: 1,
+			expectedMaxUnavailableZones: 0,
 		},
 		"RF=3, only 2 zones, two instances per zone, one instance unhealthy": {
 			ringInstances: map[string]InstanceDesc{
@@ -1013,21 +1013,18 @@ func TestRing_GetReplicationSetForOperation_WithZoneAwarenessEnabled(t *testing.
 				"instance-3": {Addr: "127.0.0.3", Zone: "zone-b", Tokens: gen.GenerateTokens(128, nil)},
 				"instance-4": {Addr: "127.0.0.4", Zone: "zone-b", Tokens: gen.GenerateTokens(128, nil)},
 			},
-			expectedAddresses:           []string{"127.0.0.1", "127.0.0.2"},
-			unhealthyInstances:          []string{"instance-4"},
-			replicationFactor:           3,
-			expectedMaxErrors:           0,
-			expectedMaxUnavailableZones: 0,
+			unhealthyInstances: []string{"instance-4"},
+			replicationFactor:  3,
+			expectedError:      ErrTooManyUnhealthyInstances,
 		},
 		"RF=3, only 1 zone, two instances per zone": {
 			ringInstances: map[string]InstanceDesc{
 				"instance-1": {Addr: "127.0.0.1", Zone: "zone-a", Tokens: gen.GenerateTokens(128, nil)},
 				"instance-2": {Addr: "127.0.0.2", Zone: "zone-a", Tokens: gen.GenerateTokens(128, nil)},
 			},
-			expectedAddresses:           []string{"127.0.0.1", "127.0.0.2"},
-			replicationFactor:           3,
-			expectedMaxErrors:           0,
-			expectedMaxUnavailableZones: 0,
+			expectedAddresses: []string{"127.0.0.1", "127.0.0.2"},
+			replicationFactor: 3,
+			expectedError:     ErrNotEnoughZones,
 		},
 		"RF=3, only 1 zone, two instances per zone, one instance unhealthy": {
 			ringInstances: map[string]InstanceDesc{
@@ -1036,7 +1033,7 @@ func TestRing_GetReplicationSetForOperation_WithZoneAwarenessEnabled(t *testing.
 			},
 			unhealthyInstances: []string{"instance-2"},
 			replicationFactor:  3,
-			expectedError:      ErrTooManyUnhealthyInstances,
+			expectedError:      ErrNotEnoughZones,
 		},
 		"RF=5, 5 zones, two instances per zone except for one zone which has three": {
 			ringInstances: map[string]InstanceDesc{
@@ -2000,7 +1997,7 @@ func TestRing_ShuffleShardWithLookback_CorrectnessWithFuzzy(t *testing.T) {
 	// are returned at any given time, BUT at least all required instances are returned.
 	var (
 		numInitialInstances = []int{9, 30, 60, 90}
-		numInitialZones     = []int{1, 3}
+		numInitialZones     = []int{2, 3}
 		numEvents           = 100
 		lookbackPeriod      = time.Hour
 		delayBetweenEvents  = 5 * time.Minute // 12 events / hour
