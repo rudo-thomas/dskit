@@ -1,5 +1,9 @@
 ## Changelog
 
+* [CHANGE] Add a new `grpc_server_recv_buffer_pools_enabled` option that enables recv buffer pools in the gRPC server (assuming `grpc_server_stats_tracking_enabled` is disabled). #510
+* [CHANGE] Add a new `grpc_server_stats_tracking_enabled` option that allows us to disable stats tracking and potentially improve server memory reuse. #507
+* [CHANGE] Add support for PROXY protocol to Server. #508
+* [CHANGE] Add a new middleware to cancel http requests cleanly based on http.TimeoutHandler. #504
 * [CHANGE] Exemplar label changes from "traceID" to "trace_id". #487
 * [CHANGE] server: import godeltaprof/http/pprof adding /debug/pprof/delta_{heap,mutex,block} endpoints to DefaultServeMux #450
 * [CHANGE] Move httpgrpc request & response utils up from httpgrpc/server to httpgrpc package #434, #435
@@ -68,6 +72,8 @@
 * [CHANGE] Expose `BuildHTTPMiddleware` to enable dskit `Server` instrumentation addition on external `*mux.Router`s. #459
 * [CHANGE] Remove `RouteHTTPToGRPC` option and related functionality #460
 * [CHANGE] Cache: Remove `MemcachedCache` and `RedisCache` structs in favor of `RemoteCacheAdapter` or using the underlying clients directly. #471
+* [CHANGE] Removed unused `time.Duration` parameter from `ShouldLog()` function in `middleware.OptionalLogging` interface. #513
+* [CHANGE] Changed `ShouldLog()` function signature in `middleware.OptionalLogging` interface to `ShouldLog(context.Context) (bool, string)`: the returned `string` contains an optional reason. When reason is valued, `GRPCServerLog` adds `(<reason>)` suffix to the error. #514
 * [FEATURE] Cache: Add support for configuring a Redis cache backend. #268 #271 #276
 * [FEATURE] Add support for waiting on the rate limiter using the new `WaitN` method. #279
 * [FEATURE] Add `log.BufferedLogger` type. #338
@@ -76,7 +82,7 @@
 * [FEATURE] Add `middleware.HTTPGRPCTracer` for more detailed server-side tracing spans and tags on `httpgrpc.HTTP/Handle` requests
 * [FEATURE] Server: Add support for `GrpcInflightMethodLimiter` -- limiting gRPC requests before reading full request into the memory. This can be used to implement global or method-specific inflight limits for gRPC methods. #377 #392
 * [FEATURE] Server: Add `-grpc.server.num-workers` flag that configures the `grpc.NumStreamWorkers()` option. This can be used to start a fixed base amount of workers to process gRPC requests and avoid stack allocation for each call. #400
-* [FEATURE] Add `PartitionRing`. The partitions ring is hash ring to shard data between partitions. #474 #476 #478 #479 #481 #483 #484 #485 #488 #489 #493 #496 #497 #498 #503
+* [FEATURE] Add `PartitionRing`. The partitions ring is hash ring to shard data between partitions. #474 #476 #478 #479 #481 #483 #484 #485 #488 #489 #493 #496 #497 #498 #503 #509
 * [FEATURE] Add methods `Increment`, `FlushAll`, `CompareAndSwap`, `Touch` to `cache.MemcachedClient` #477
 * [FEATURE] Add `concurrency.ForEachJobMergeResults()` utility function. #486
 * [FEATURE] Add `ring.DoMultiUntilQuorumWithoutSuccessfulContextCancellation()`. #495
@@ -199,6 +205,7 @@
   * `gate_duration_seconds`
   * `kv_request_duration_seconds`
   * `operation_duration_seconds`
+* [ENHANCEMENT] Add `outcome` label to `gate_duration_seconds` metric. Possible values are `rejected_canceled`, `rejected_deadline_exceeded`, `rejected_other`, and `permitted`. #512
 * [BUGFIX] spanlogger: Support multiple tenant IDs. #59
 * [BUGFIX] Memberlist: fixed corrupted packets when sending compound messages with more than 255 messages or messages bigger than 64KB. #85
 * [BUGFIX] Ring: `ring_member_ownership_percent` and `ring_tokens_owned` metrics are not updated on scale down. #109

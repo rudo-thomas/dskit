@@ -170,7 +170,9 @@ func TestServerHandleDoNotLogError(t *testing.T) {
 				var optional middleware.OptionalLogging
 				if testData.doNotLogError {
 					require.ErrorAs(t, err, &optional)
-					require.False(t, optional.ShouldLog(context.Background(), 0))
+
+					actual, _ := optional.ShouldLog(context.Background())
+					require.False(t, actual)
 				} else {
 					require.False(t, errors.As(err, &optional))
 				}
