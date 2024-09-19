@@ -2,7 +2,9 @@ package httpgrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/gogo/status"
@@ -29,6 +31,21 @@ func TestAppendMessageSizeToOutgoingContext(t *testing.T) {
 	require.Equal(t, []string{"/test"}, md.Get(MetadataURL))
 }
 
+func TestToHeader(t *testing.T) {
+	grpcHeaders := []*Header{
+		{Key: "X-Header", Values: []string{"a", "b", "c"}},
+		{Key: "traceparent", Values: []string{"01234"}},
+	}
+	httpHeaders := http.Header{}
+	ToHeader(grpcHeaders, httpHeaders)
+
+	require.Equal(t, http.Header{
+		"X-Header":    []string{"a", "b", "c"},
+		"Traceparent": []string{"01234"},
+	}, httpHeaders)
+	require.Equal(t, "01234", httpHeaders.Get("traceparent"))
+}
+
 func TestErrorf(t *testing.T) {
 	code := 400
 	errMsg := "this is an error"
@@ -36,7 +53,7 @@ func TestErrorf(t *testing.T) {
 		Code: int32(code),
 		Body: []byte(errMsg),
 	}
-	err := Errorf(code, errMsg)
+	err := Error(code, errMsg)
 	stat, ok := status.FromError(err)
 	require.True(t, ok)
 	require.Equal(t, code, int(stat.Code()))
@@ -74,7 +91,7 @@ func TestHTTPResponseFromError(t *testing.T) {
 			err: nil,
 		},
 		"a random error cannot be parsed to an HTTPResponse": {
-			err: fmt.Errorf(msgErr),
+			err: errors.New(msgErr),
 		},
 		"a gRPC error built by gogo/status cannot be parsed to an HTTPResponse": {
 			err: status.Error(codes.Internal, msgErr),
@@ -83,11 +100,11 @@ func TestHTTPResponseFromError(t *testing.T) {
 			err: grpcstatus.Error(codes.Internal, msgErr),
 		},
 		"a gRPC error built by httpgrpc can be parsed to an HTTPResponse": {
-			err:                  Errorf(400, msgErr),
+			err:                  Error(400, msgErr),
 			expectedHTTPResponse: &HTTPResponse{Code: 400, Body: []byte(msgErr)},
 		},
 		"a wrapped gRPC error built by httpgrpc can be parsed to an HTTPResponse": {
-			err:                  fmt.Errorf("wrapped: %w", Errorf(400, msgErr)),
+			err:                  fmt.Errorf("wrapped: %w", Error(400, msgErr)),
 			expectedHTTPResponse: &HTTPResponse{Code: 400, Body: []byte(msgErr)},
 		},
 	}

@@ -218,7 +218,7 @@ func TestHTTPGRPCTracing(t *testing.T) {
 
 			grpc_health_v1.RegisterHealthServer(server.GRPC, health.NewServer())
 
-			handlerFunc := func(w http.ResponseWriter, r *http.Request) {}
+			handlerFunc := func(http.ResponseWriter, *http.Request) {}
 			if test.routeName != "" {
 				// explicitly-named routes will be labeled using the provided route name
 				server.HTTP.NewRoute().Name(test.routeName).Path(test.routeTmpl).HandlerFunc(handlerFunc)
@@ -233,7 +233,7 @@ func TestHTTPGRPCTracing(t *testing.T) {
 			t.Cleanup(server.Shutdown)
 
 			target := server.GRPCListenAddr()
-			conn, err := grpc.Dial(
+			conn, err := grpc.NewClient(
 				target.String(),
 				grpc.WithTransportCredentials(insecure.NewCredentials()),
 				grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4*1024*1024)),

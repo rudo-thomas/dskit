@@ -26,7 +26,7 @@ var (
 	ErrRedisConfigNoEndpoint               = errors.New("no redis endpoint provided")
 	ErrRedisMaxAsyncConcurrencyNotPositive = errors.New("max async concurrency must be positive")
 
-	_ RemoteCacheClient = (*RedisClient)(nil)
+	_ Cache = (*RedisClient)(nil)
 )
 
 // RedisClientConfig is the config accepted by RedisClient.
@@ -311,12 +311,7 @@ func (c *RedisClient) Name() string {
 	return c.name
 }
 
-// stringToBytes converts string to byte slice (copied from vendor/github.com/go-redis/redis/v8/internal/util/unsafe.go).
+// stringToBytes converts string to byte slice.
 func stringToBytes(s string) []byte {
-	return *(*[]byte)(unsafe.Pointer(
-		&struct {
-			string
-			Cap int
-		}{s, len(s)},
-	))
+	return unsafe.Slice(unsafe.StringData(s), len(s))
 }

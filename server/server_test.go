@@ -18,7 +18,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -48,7 +47,7 @@ func (f FakeServer) FailWithError(_ context.Context, _ *protobuf.Empty) (*protob
 }
 
 func (f FakeServer) FailWithHTTPError(_ context.Context, req *FailWithHTTPErrorRequest) (*protobuf.Empty, error) {
-	return nil, httpgrpc.Errorf(int(req.Code), strconv.Itoa(int(req.Code)))
+	return nil, httpgrpc.Errorf(int(req.Code), "%d", req.Code)
 }
 
 func (f FakeServer) Succeed(_ context.Context, _ *protobuf.Empty) (*protobuf.Empty, error) {
@@ -142,7 +141,7 @@ func TestDefaultAddresses(t *testing.T) {
 	fakeServer := FakeServer{}
 	RegisterFakeServerServer(server.GRPC, fakeServer)
 
-	server.HTTP.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.HandleFunc("/test", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(204)
 	})
 
@@ -151,7 +150,7 @@ func TestDefaultAddresses(t *testing.T) {
 	}()
 	defer server.Shutdown()
 
-	conn, err := grpc.Dial("localhost:9095", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("localhost:9095", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -181,15 +180,15 @@ func TestErrorInstrumentationMiddleware(t *testing.T) {
 	fakeServer := FakeServer{}
 	RegisterFakeServerServer(server.GRPC, fakeServer)
 
-	server.HTTP.HandleFunc("/succeed", func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.HandleFunc("/succeed", func(http.ResponseWriter, *http.Request) {
 	})
-	server.HTTP.HandleFunc("/error500", func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.HandleFunc("/error500", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(500)
 	})
-	server.HTTP.HandleFunc("/sleep10", func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.HandleFunc("/sleep10", func(_ http.ResponseWriter, r *http.Request) {
 		_ = cancelableSleep(r.Context(), time.Second*10)
 	})
-	server.HTTP.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
@@ -197,7 +196,7 @@ func TestErrorInstrumentationMiddleware(t *testing.T) {
 		require.NoError(t, server.Run())
 	}()
 
-	conn, err := grpc.Dial(server.GRPCListenAddr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(server.GRPCListenAddr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -322,13 +321,13 @@ func TestHTTPInstrumentationMetrics(t *testing.T) {
 	server, err := New(cfg)
 	require.NoError(t, err)
 
-	server.HTTP.HandleFunc("/succeed", func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.HandleFunc("/succeed", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("OK"))
 	})
-	server.HTTP.HandleFunc("/error500", func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.HandleFunc("/error500", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(500)
 	})
-	server.HTTP.HandleFunc("/sleep10", func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.HandleFunc("/sleep10", func(_ http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body) // Consume body, otherwise it's not counted.
 		_ = cancelableSleep(r.Context(), time.Second*10)
 	})
@@ -521,7 +520,7 @@ func TestMiddlewareLogging(t *testing.T) {
 	server, err := New(cfg)
 	require.NoError(t, err)
 
-	server.HTTP.HandleFunc("/error500", func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.HandleFunc("/error500", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(500)
 	})
 
@@ -566,7 +565,7 @@ func TestTLSServer(t *testing.T) {
 	server, err := New(cfg)
 	require.NoError(t, err)
 
-	server.HTTP.HandleFunc("/testhttps", func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.HandleFunc("/testhttps", func(w http.ResponseWriter, _ *http.Request) {
 		_, err := w.Write([]byte("Hello World!"))
 		require.NoError(t, err)
 	})
@@ -609,7 +608,7 @@ func TestTLSServer(t *testing.T) {
 	expected := []byte("Hello World!")
 	require.Equal(t, expected, body)
 
-	conn, err := grpc.Dial(server.GRPCListenAddr().String(), grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	conn, err := grpc.NewClient(server.GRPCListenAddr().String(), grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -661,7 +660,7 @@ func TestTLSServerWithInlineCerts(t *testing.T) {
 
 	require.NoError(t, err)
 
-	server.HTTP.HandleFunc("/testhttps", func(w http.ResponseWriter, r *http.Request) {
+	server.HTTP.HandleFunc("/testhttps", func(w http.ResponseWriter, _ *http.Request) {
 		_, err := w.Write([]byte("Hello World!"))
 		require.NoError(t, err)
 	})
@@ -700,7 +699,7 @@ func TestTLSServerWithInlineCerts(t *testing.T) {
 	expected := []byte("Hello World!")
 	require.Equal(t, expected, body)
 
-	conn, err := grpc.Dial(server.GRPCListenAddr().String(), grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	conn, err := grpc.NewClient(server.GRPCListenAddr().String(), grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -753,7 +752,7 @@ func TestLogSourceIPs(t *testing.T) {
 		server, err := New(cfg)
 		require.NoError(t, err)
 
-		server.HTTP.HandleFunc("/error500", func(w http.ResponseWriter, r *http.Request) {
+		server.HTTP.HandleFunc("/error500", func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(500)
 		})
 
@@ -861,7 +860,7 @@ func (pc *proxyProtocolConn) Write(b []byte) (int, error) {
 }
 
 func proxyDialer(proxyHeader string) func(context.Context, string, string) (net.Conn, error) {
-	return func(ctx context.Context, network string, addr string) (net.Conn, error) {
+	return func(_ context.Context, network string, addr string) (net.Conn, error) {
 		conn, err := net.Dial(network, addr)
 		if err != nil {
 			return nil, err
@@ -949,11 +948,13 @@ func TestGrpcOverProxyProtocol(t *testing.T) {
 	var cfg Config
 	cfg.RegisterFlags(flag.NewFlagSet("", flag.ExitOnError))
 	cfg.ProxyProtocolEnabled = true
+	// Set this to 0 to have it choose a random port
+	cfg.HTTPListenPort = 0
 
 	fakeSourceIP := "1.2.3.4"
 
 	// Custom dialer that sends a PROXY header
-	customDialer := func(ctx context.Context, address string) (net.Conn, error) {
+	customDialer := func(_ context.Context, address string) (net.Conn, error) {
 		conn, err := net.Dial("tcp", address)
 		if err != nil {
 			return nil, err
@@ -980,7 +981,7 @@ func TestGrpcOverProxyProtocol(t *testing.T) {
 	}()
 	defer server.Shutdown()
 
-	conn, err := grpc.Dial("localhost:9095", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(customDialer))
+	conn, err := grpc.NewClient("localhost:9095", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(customDialer))
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -1018,16 +1019,4 @@ func httpTarget(srv *Server, path string) string {
 
 func httpsTarget(srv *Server, path string) string {
 	return fmt.Sprintf("https://%s%s", srv.HTTPListenAddr().String(), path)
-}
-
-func TestGrpcServerRecvBuffersConfigError(t *testing.T) {
-	var cfg Config
-	cfg.RegisterFlags(flag.NewFlagSet("", flag.ExitOnError))
-	setAutoAssignedPorts(DefaultNetwork, &cfg)
-	cfg.GRPCServerStatsTrackingEnabled = true
-	cfg.GRPCServerRecvBufferPoolsEnabled = true
-	cfg.MetricsNamespace = "testing_grpc_config_conflicts"
-
-	_, err := New(cfg)
-	require.Error(t, err)
 }

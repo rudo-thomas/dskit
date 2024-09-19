@@ -339,7 +339,7 @@ func TestCASNoOutput(t *testing.T) {
 	withFixtures(t, func(t *testing.T, kv *Client) {
 		// should succeed with single call
 		calls := 0
-		err := cas(kv, key, func(d *data) (*data, bool, error) {
+		err := cas(kv, key, func(*data) (*data, bool, error) {
 			calls++
 			return nil, true, nil
 		})
@@ -352,7 +352,7 @@ func TestCASNoOutput(t *testing.T) {
 func TestCASErrorNoRetry(t *testing.T) {
 	withFixtures(t, func(t *testing.T, kv *Client) {
 		calls := 0
-		err := casWithErr(context.Background(), kv, key, func(d *data) (*data, bool, error) {
+		err := casWithErr(context.Background(), kv, key, func(*data) (*data, bool, error) {
 			calls++
 			return nil, false, errors.New("don't worry, be happy")
 		})
@@ -364,7 +364,7 @@ func TestCASErrorNoRetry(t *testing.T) {
 func TestCASErrorWithRetries(t *testing.T) {
 	withFixtures(t, func(t *testing.T, kv *Client) {
 		calls := 0
-		err := casWithErr(context.Background(), kv, key, func(d *data) (*data, bool, error) {
+		err := casWithErr(context.Background(), kv, key, func(*data) (*data, bool, error) {
 			calls++
 			return nil, true, errors.New("don't worry, be happy")
 		})
@@ -437,7 +437,7 @@ func TestCASNoChangeShortTimeout(t *testing.T) {
 
 func TestCASFailedBecauseOfVersionChanges(t *testing.T) {
 	withFixtures(t, func(t *testing.T, kv *Client) {
-		err := cas(kv, key, func(in *data) (*data, bool, error) {
+		err := cas(kv, key, func(*data) (*data, bool, error) {
 			return &data{Members: map[string]member{"nonempty": {Timestamp: time.Now().Unix()}}}, true, nil
 		})
 		require.NoError(t, err)
@@ -718,7 +718,7 @@ func testMultipleClientsWithConfigGenerator(t *testing.T, members int, configGen
 
 	startTime := time.Now()
 	firstKv := clients[0]
-	ctx, cancel := context.WithTimeout(context.Background(), casInterval*3/2) // Watch for 1.5 cas intervals.
+	ctx, cancel := context.WithTimeout(context.Background(), casInterval*3) // Watch for 3x cas intervals.
 	updates := 0
 	firstKv.WatchKey(ctx, key, func(in interface{}) bool {
 		updates++
@@ -1540,7 +1540,7 @@ func TestMetricsRegistration(t *testing.T) {
 
 	reg := prometheus.NewPedanticRegistry()
 	kv := NewKV(cfg, log.NewNopLogger(), &dnsProviderMock{}, reg)
-	err := kv.CAS(context.Background(), "test", c, func(in interface{}) (out interface{}, retry bool, err error) {
+	err := kv.CAS(context.Background(), "test", c, func(interface{}) (out interface{}, retry bool, err error) {
 		return &data{Members: map[string]member{
 			"member": {},
 		}}, true, nil
@@ -1646,4 +1646,67 @@ func (p *delayedDNSProviderMock) Resolve(_ context.Context, addrs []string) erro
 
 func (p delayedDNSProviderMock) Addresses() []string {
 	return p.resolved
+}
+
+func TestGetBroadcastsPrefersLocalUpdates(t *testing.T) {
+	codec := dataCodec{}
+
+	cfg := KVConfig{
+		TCPTransport: TCPTransportConfig{
+			BindAddrs: getLocalhostAddrs(),
+		},
+	}
+
+	// We will be checking for number of messages in the broadcast queue, so make sure to use known retransmit factor.
+	cfg.RetransmitMult = 1
+	cfg.Codecs = append(cfg.Codecs, codec)
+
+	reg := prometheus.NewRegistry()
+	kv := NewKV(cfg, log.NewNopLogger(), &dnsProviderMock{}, reg)
+	require.NoError(t, services.StartAndAwaitRunning(context.Background(), kv))
+	defer services.StopAndAwaitTerminated(context.Background(), kv) //nolint:errcheck
+
+	now := time.Now()
+
+	smallUpdate := &data{Members: map[string]member{"a": {Timestamp: now.Unix(), State: JOINING}}}
+	bigUpdate := &data{Members: map[string]member{"b": {Timestamp: now.Unix(), State: JOINING}, "c": {Timestamp: now.Unix(), State: JOINING}, "d": {Timestamp: now.Unix(), State: JOINING}}}
+	mediumUpdate := &data{Members: map[string]member{"d": {Timestamp: now.Unix(), State: JOINING}, "e": {Timestamp: now.Unix(), State: JOINING}}}
+
+	// No broadcast messages from KV at the beginning.
+	require.Equal(t, 0, len(kv.GetBroadcasts(0, math.MaxInt32)))
+
+	// Check that locally-generated broadcast messages will be prioritized and sent out first, even if they are enqueued later or are smaller than other messages in the queue.
+	kv.broadcastNewValue("non-local", smallUpdate, 1, codec, false)
+	kv.broadcastNewValue("non-local", bigUpdate, 2, codec, false)
+	kv.broadcastNewValue("local", smallUpdate, 1, codec, true)
+	kv.broadcastNewValue("local", bigUpdate, 2, codec, true)
+	kv.broadcastNewValue("local", mediumUpdate, 3, codec, true)
+
+	err := testutil.GatherAndCompare(reg, bytes.NewBufferString(`
+		# HELP memberlist_client_messages_in_broadcast_queue Number of user messages in the broadcast queue
+		# TYPE memberlist_client_messages_in_broadcast_queue gauge
+		memberlist_client_messages_in_broadcast_queue{queue="gossip"} 2
+		memberlist_client_messages_in_broadcast_queue{queue="local"} 3
+	`), "memberlist_client_messages_in_broadcast_queue")
+	require.NoError(t, err)
+
+	msgs := kv.GetBroadcasts(0, 10000)
+	require.Len(t, msgs, 5) // we get all 4 messages
+	require.Equal(t, "local", getKey(t, msgs[0]))
+	require.Equal(t, "local", getKey(t, msgs[1]))
+	require.Equal(t, "local", getKey(t, msgs[2]))
+	require.Equal(t, "non-local", getKey(t, msgs[3]))
+	require.Equal(t, "non-local", getKey(t, msgs[4]))
+
+	// Check that TransmitLimitedQueue.GetBroadcasts preferred larger messages (it does that).
+	require.True(t, len(msgs[0]) > len(msgs[1])) // Bigger local message is returned before medium one.
+	require.True(t, len(msgs[1]) > len(msgs[2])) // Medium local message is returned before small one.
+	require.True(t, len(msgs[3]) > len(msgs[4])) // Bigger non-local message is returned before smaller one
+}
+
+func getKey(t *testing.T, msg []byte) string {
+	kvPair := KeyValuePair{}
+	err := kvPair.Unmarshal(msg)
+	require.NoError(t, err)
+	return kvPair.Key
 }

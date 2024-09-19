@@ -32,6 +32,8 @@ import (
 	"github.com/grafana/dskit/crypto/tls"
 )
 
+const mismatchCAAndCerts = "remote error: tls: unknown certificate authority"
+
 type tcIntegrationClientServer struct {
 	name            string
 	tlsGrpcEnabled  bool
@@ -102,7 +104,7 @@ func newIntegrationClientServer(
 	serv, err := server.New(cfg)
 	require.NoError(t, err)
 
-	serv.HTTP.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+	serv.HTTP.HandleFunc("/hello", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "OK")
 	})
 
@@ -155,7 +157,7 @@ func newIntegrationClientServer(
 			assert.NoError(t, err, tc.name)
 			dialOptions = append([]grpc.DialOption{grpc.WithDefaultCallOptions(clientConfig.CallOptions()...)}, dialOptions...)
 
-			conn, err := grpc.Dial(grpcHost, dialOptions...)
+			conn, err := grpc.NewClient(grpcHost, dialOptions...)
 			assert.NoError(t, err, tc.name)
 			require.NoError(t, err, tc.name)
 			require.NoError(t, err, tc.name)
@@ -363,6 +365,8 @@ func TestTLSServerWithLocalhostCertWithClientCertificateEnforcementUsingClientCA
 	// bad certificate from the server side and just see connection
 	// closed/reset instead
 	badCertErr := errorContainsString(badCertificateErrorMessage)
+	mismatchCAAndCertsErr := errorContainsString(mismatchCAAndCerts)
+
 	newIntegrationClientServer(
 		t,
 		cfg,
@@ -411,7 +415,7 @@ func TestTLSServerWithLocalhostCertWithClientCertificateEnforcementUsingClientCA
 					CertPath: certs.client2CertFile,
 					KeyPath:  certs.client2KeyFile,
 				},
-				httpExpectError: badCertErr,
+				httpExpectError: mismatchCAAndCertsErr,
 				grpcExpectError: unavailableDescErr,
 			},
 		},

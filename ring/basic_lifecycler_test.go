@@ -102,6 +102,19 @@ func TestBasicLifecycler_RegisterOnStart(t *testing.T) {
 			registerState:  ACTIVE,
 			registerTokens: Tokens{1, 2, 3, 4, 5},
 		},
+		"initial ring contains read only instance": {
+			initialInstanceID: testInstanceID,
+			initialInstanceDesc: &InstanceDesc{
+				Addr:                     "1.1.1.1",
+				State:                    ACTIVE,
+				Tokens:                   Tokens{1, 2, 3, 4, 5},
+				RegisteredTimestamp:      time.Now().Add(-time.Hour).Unix(),
+				ReadOnly:                 true,
+				ReadOnlyUpdatedTimestamp: time.Now().Unix(),
+			},
+			registerState:  ACTIVE,
+			registerTokens: Tokens{1, 2, 3, 4, 5},
+		},
 	}
 
 	for testName, testData := range tests {
@@ -118,7 +131,7 @@ func TestBasicLifecycler_RegisterOnStart(t *testing.T) {
 					desc := testData.initialInstanceDesc
 
 					ringDesc := GetOrCreateRingDesc(in)
-					ringDesc.AddIngester(testData.initialInstanceID, desc.Addr, desc.Zone, desc.Tokens, desc.State, desc.GetRegisteredAt())
+					ringDesc.AddIngester(testData.initialInstanceID, desc.Addr, desc.Zone, desc.Tokens, desc.State, desc.GetRegisteredAt(), desc.ReadOnly, time.Unix(desc.ReadOnlyUpdatedTimestamp, 0))
 					return ringDesc, true, nil
 				}))
 			}
@@ -138,6 +151,8 @@ func TestBasicLifecycler_RegisterOnStart(t *testing.T) {
 					assert.Equal(t, testData.initialInstanceDesc.State, instanceDesc.State)
 					assert.Equal(t, testData.initialInstanceDesc.Tokens, instanceDesc.Tokens)
 					assert.Equal(t, testData.initialInstanceDesc.RegisteredTimestamp, instanceDesc.RegisteredTimestamp)
+					assert.Equal(t, testData.initialInstanceDesc.ReadOnly, instanceDesc.ReadOnly)
+					assert.Equal(t, testData.initialInstanceDesc.ReadOnlyUpdatedTimestamp, instanceDesc.ReadOnlyUpdatedTimestamp)
 				} else {
 					assert.False(t, instanceExists)
 				}
@@ -389,7 +404,7 @@ func TestBasicLifecycler_HeartbeatAfterBackendReset(t *testing.T) {
 
 	// Now we delete it from the ring to simulate a ring storage reset and we expect the next heartbeat
 	// will restore it.
-	require.NoError(t, store.CAS(ctx, testRingKey, func(in interface{}) (out interface{}, retry bool, err error) {
+	require.NoError(t, store.CAS(ctx, testRingKey, func(interface{}) (out interface{}, retry bool, err error) {
 		return NewDesc(), true, nil
 	}))
 
@@ -463,7 +478,7 @@ func TestBasicLifecycler_TokensObservePeriod(t *testing.T) {
 		// Remove some tokens.
 		return store.CAS(ctx, testRingKey, func(in interface{}) (out interface{}, retry bool, err error) {
 			ringDesc := GetOrCreateRingDesc(in)
-			ringDesc.AddIngester(testInstanceID, desc.Addr, desc.Zone, Tokens{4, 5}, desc.State, time.Now())
+			ringDesc.AddIngester(testInstanceID, desc.Addr, desc.Zone, Tokens{4, 5}, desc.State, time.Now(), false, time.Time{})
 			return ringDesc, true, nil
 		}) == nil
 	})
@@ -495,13 +510,13 @@ func TestBasicLifecycler_updateInstance_ShouldAddInstanceToTheRingIfDoesNotExist
 	expectedRegisteredAt := lifecycler.GetRegisteredAt()
 
 	// Now we delete it from the ring to simulate a ring storage reset.
-	require.NoError(t, store.CAS(ctx, testRingKey, func(in interface{}) (out interface{}, retry bool, err error) {
+	require.NoError(t, store.CAS(ctx, testRingKey, func(interface{}) (out interface{}, retry bool, err error) {
 		return NewDesc(), true, nil
 	}))
 
 	// Run a noop update instance, but since the instance is not in the ring we do expect
 	// it will added back anyway.
-	require.NoError(t, lifecycler.updateInstance(ctx, func(_ *Desc, desc *InstanceDesc) bool {
+	require.NoError(t, lifecycler.updateInstance(ctx, func(*Desc, *InstanceDesc) bool {
 		return false
 	}))
 
